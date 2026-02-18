@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow, noarchive" />
+  <title>Sudoku</title>
+  <style>
+    :root{
+      --bg:#0b0c10;--card:rgba(255,255,255,.06);--line:rgba(255,255,255,.14);
+      --text:#e8eaed;--muted:rgba(232,234,237,.7);
+      --ok:#7bd389;--warn:#ffd166;--bad:#ff6b6b;
+      --cell:clamp(34px, 8.2vw, 52px);
+    }
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);
+      font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    .wrap{width:min(980px,94vw);padding:18px 10px;}
+    .top{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+    h1{margin:0;font-size:clamp(20px,4.2vw,26px);letter-spacing:.2px}
+    .sub{color:var(--muted);font-size:13px;margin-top:4px}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .btn{appearance:none;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);
+      border-radius:12px;padding:8px 10px;cursor:pointer;font-size:13px}
+    .btn:hover{background:rgba(255,255,255,.08)}
+    select{appearance:none;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);
+      border-radius:12px;padding:8px 10px;cursor:pointer;font-size:13px}
+
+    .grid{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;justify-items:center}
+    @media (min-width:900px){.grid{grid-template-columns:auto 1fr;justify-content:center}}
+
+    .board{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;justify-self:center;}
+    .sudoku{display:grid;grid-template-columns:repeat(9,var(--cell));grid-template-rows:repeat(9,var(--cell));gap:0;user-select:none}
+
+    .cell{width:var(--cell);height:var(--cell);display:grid;place-items:center;
+      border:1px solid rgba(255,255,255,.10);position:relative}
+    .cell:nth-child(3n){border-right-color:rgba(255,255,255,.22)}
+    .cell:nth-child(9n+1){border-left-color:rgba(255,255,255,.22)}
+    /* thick horizontal lines */
+    .cell.r3,.cell.r6{border-bottom-color:rgba(255,255,255,.22)}
+    .cell.r0{border-top-color:rgba(255,255,255,.22)}
+
+    input{
+      width:100%;height:100%;
+      border:0;background:transparent;
+      color:var(--text);
+      font-size:22px;font-weight:650;
+      text-align:center;outline:none;
+      caret-color:transparent;
+    }
+    input.given{color:rgba(232,234,237,.92);font-weight:800}
+    input.edit{color:rgba(255,209,102,.95)}
+
+    .cell.sel{background:rgba(255,255,255,.06)}
+    .cell.same{background:rgba(255,209,102,.08)}
+    .cell.bad{background:rgba(255,107,107,.12)}
+
+    .side{display:flex;flex-direction:column;gap:12px}
+    .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;}
+    .status{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+    .pill{border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px;color:var(--muted)}
+
+    .keypad{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:10px}
+    .key{appearance:none;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);
+      border-radius:12px;padding:12px 0;cursor:pointer;font-size:16px}
+    .key:hover{background:rgba(255,255,255,.08)}
+
+    .hint{color:var(--muted);font-size:12px;line-height:1.4}
+    .ok{color:var(--ok)}
+    .badText{color:var(--bad)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>Sudoku</h1>
+        <div class="sub">Click a cell → number (1–9). Backspace/Delete — erase. N — new game.</div>
+      </div>
+      <div class="actions">
+        <select id="difficulty" title="сложность">
+          <option value="easy">easy</option>
+          <option value="medium" selected>medium</option>
+          <option value="hard">hard</option>
+        </select>
+        <button class="btn" id="new">New</button>
+        <button class="btn" id="check">Check</button>
+        <button class="btn" id="solve">Solve</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="board">
+        <div class="sudoku" id="sudoku" aria-label="sudoku board"></div>
+      </div>
+
+      <div class="side">
+        <div class="panel">
+          <div class="status">
+            <div class="pill" id="mist">mistakes: 0</div>
+            <div class="pill" id="filled">filled: 0/81</div>
+            <div class="pill" id="state">—</div>
+          </div>
+          <div class="keypad" id="keypad"></div>
+          <div class="hint">
+            Highlights:
+            <div>— <span class="ok">yellow</span> — your inputs</div>
+            <div>— <span class="badText">red</span> — conflict in row/column/box</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="hint">
+            This is a fully offline page (no server). Generator is simple: create a solved grid → remove numbers.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const boardEl = $('sudoku');
+  const diffEl = $('difficulty');
+  const newBtn = $('new');
+  const checkBtn = $('check');
+  const solveBtn = $('solve');
+  const mistEl = $('mist');
+  const filledEl = $('filled');
+  const stateEl = $('state');
+  const keypadEl = $('keypad');
+
+  const N = 9;
+  const SIZE = 81;
+
+  // --- utils
+  const idx = (r,c) => r*9+c;
+  const rc = (i) => [Math.floor(i/9), i%9];
+  const box = (r,c) => Math.floor(r/3)*3 + Math.floor(c/3);
+
+  const shuffle = (arr) => {
+    for (let i = arr.length-1; i>0; i--) {
+      const j = Math.floor(Math.random()*(i+1));
+      [arr[i],arr[j]] = [arr[j],arr[i]];
+    }
+    return arr;
+  };
+
+  function clone(a){ return a.slice(); }
+
+  function isValid(grid, r, c, v) {
+    // row/col
+    for (let k=0;k<9;k++) {
+      if (k!==c && grid[idx(r,k)]===v) return false;
+      if (k!==r && grid[idx(k,c)]===v) return false;
+    }
+    // box
+    const r0 = Math.floor(r/3)*3;
+    const c0 = Math.floor(c/3)*3;
+    for (let dr=0; dr<3; dr++) for (let dc=0; dc<3; dc++) {
+      const rr=r0+dr, cc=c0+dc;
+      if (rr===r && cc===c) continue;
+      if (grid[idx(rr,cc)]===v) return false;
+    }
+    return true;
+  }
+
+  function findEmpty(grid) {
+    for (let i=0;i<SIZE;i++) if (!grid[i]) return i;
+    return -1;
+  }
+
+  function solve(grid, randomize=false, limit=2) {
+    // backtracking; returns {solvedGrid, count}
+    let count = 0;
+    let solvedGrid = null;
+
+    const recur = (g) => {
+      if (count >= limit) return;
+      const i = findEmpty(g);
+      if (i === -1) { count++; solvedGrid = clone(g); return; }
+      const [r,c] = rc(i);
+      const nums = randomize ? shuffle([1,2,3,4,5,6,7,8,9]) : [1,2,3,4,5,6,7,8,9];
+      for (const v of nums) {
+        if (isValid(g,r,c,v)) {
+          g[i]=v;
+          recur(g);
+          g[i]=0;
+          if (count >= limit) return;
+        }
+      }
+    };
+
+    recur(grid);
+    return { solvedGrid, count };
+  }
+
+  function generateSolved() {
+    const g = Array(SIZE).fill(0);
+    // seed diagonal boxes for speed
+    for (let b=0;b<3;b++) {
+      const r0=b*3, c0=b*3;
+      const nums=shuffle([1,2,3,4,5,6,7,8,9]);
+      let t=0;
+      for (let dr=0;dr<3;dr++) for (let dc=0;dc<3;dc++) g[idx(r0+dr,c0+dc)] = nums[t++];
+    }
+    const res = solve(g, true, 1);
+    return res.solvedGrid;
+  }
+
+  function makePuzzle(solved, difficulty) {
+    // remove cells; keep unique solution (light check)
+    const g = clone(solved);
+
+    const targetHoles = ({
+      easy: 40,
+      medium: 50,
+      hard: 58,
+    })[difficulty] ?? 50;
+
+    const order = shuffle([...Array(SIZE).keys()]);
+    let holes = 0;
+
+    for (const i of order) {
+      if (holes >= targetHoles) break;
+      const backup = g[i];
+      g[i] = 0;
+
+      // uniqueness-ish check: count up to 2 solutions
+      const t = clone(g);
+      const { count } = solve(t, false, 2);
+      if (count !== 1) {
+        g[i] = backup; // revert
+      } else {
+        holes++;
+      }
+    }
+
+    return g;
+  }
+
+  // --- UI state
+  let solution = Array(SIZE).fill(0);
+  let puzzle = Array(SIZE).fill(0);
+  let user = Array(SIZE).fill(0);
+  let given = Array(SIZE).fill(false);
+  let selected = -1;
+
+  function render() {
+    boardEl.innerHTML = '';
+
+    for (let i=0;i<SIZE;i++) {
+      const [r,c] = rc(i);
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      // thick horizontal borders
+      if (r===0) cell.classList.add('r0');
+      if (r===2) cell.classList.add('r3');
+      if (r===5) cell.classList.add('r6');
+
+      const inp = document.createElement('input');
+      inp.inputMode = 'numeric';
+      inp.maxLength = 1;
+      inp.value = user[i] ? String(user[i]) : '';
+
+      if (given[i]) {
+        inp.classList.add('given');
+        inp.disabled = true;
+      } else {
+        inp.classList.add('edit');
+        inp.addEventListener('focus', () => select(i));
+        inp.addEventListener('click', () => select(i));
+        inp.addEventListener('beforeinput', (e) => e.preventDefault()); // keep controlled
+      }
+
+      cell.addEventListener('click', () => { if (!given[i]) select(i); });
+      cell.appendChild(inp);
+      boardEl.appendChild(cell);
+    }
+
+    applyHighlights();
+    updateStats();
+  }
+
+  function select(i) {
+    selected = i;
+    applyHighlights();
+  }
+
+  function applyHighlights() {
+    const cells = boardEl.querySelectorAll('.cell');
+    cells.forEach((c) => c.classList.remove('sel','same','bad'));
+
+    if (selected >= 0) {
+      cells[selected].classList.add('sel');
+      const v = user[selected];
+      if (v) {
+        for (let i=0;i<SIZE;i++) if (user[i] === v) cells[i].classList.add('same');
+      }
+    }
+
+    // mark conflicts
+    const bad = findConflicts(user);
+    for (const i of bad) cells[i].classList.add('bad');
+  }
+
+  function findConflicts(grid) {
+    const bad = new Set();
+
+    // rows
+    for (let r=0;r<9;r++) {
+      const pos = new Map();
+      for (let c=0;c<9;c++) {
+        const i = idx(r,c);
+        const v = grid[i];
+        if (!v) continue;
+        if (!pos.has(v)) pos.set(v, [i]);
+        else pos.get(v).push(i);
+      }
+      for (const arr of pos.values()) if (arr.length>1) arr.forEach(i=>bad.add(i));
+    }
+
+    // cols
+    for (let c=0;c<9;c++) {
+      const pos = new Map();
+      for (let r=0;r<9;r++) {
+        const i = idx(r,c);
+        const v = grid[i];
+        if (!v) continue;
+        if (!pos.has(v)) pos.set(v, [i]);
+        else pos.get(v).push(i);
+      }
+      for (const arr of pos.values()) if (arr.length>1) arr.forEach(i=>bad.add(i));
+    }
+
+    // boxes
+    for (let br=0;br<3;br++) for (let bc=0;bc<3;bc++) {
+      const pos = new Map();
+      for (let dr=0;dr<3;dr++) for (let dc=0;dc<3;dc++) {
+        const r=br*3+dr, c=bc*3+dc;
+        const i=idx(r,c);
+        const v=grid[i];
+        if (!v) continue;
+        if (!pos.has(v)) pos.set(v, [i]);
+        else pos.get(v).push(i);
+      }
+      for (const arr of pos.values()) if (arr.length>1) arr.forEach(i=>bad.add(i));
+    }
+
+    return bad;
+  }
+
+  function updateStats() {
+    const filled = user.filter(Boolean).length;
+    const conflicts = findConflicts(user).size;
+    filledEl.textContent = `filled: ${filled}/81`;
+    mistEl.textContent = `mistakes: ${conflicts}`;
+
+    if (conflicts) {
+      stateEl.textContent = 'conflicts found';
+      stateEl.style.color = 'var(--bad)';
+      return;
+    }
+
+    if (filled === 81) {
+      // verify against solution
+      const ok = user.every((v,i)=>v===solution[i]);
+      if (ok) {
+        stateEl.textContent = 'solved!';
+        stateEl.style.color = 'var(--ok)';
+      } else {
+        stateEl.textContent = 'filled (but not correct)';
+        stateEl.style.color = 'var(--warn)';
+      }
+    } else {
+      stateEl.textContent = 'in progress';
+      stateEl.style.color = 'var(--muted)';
+    }
+  }
+
+  function setValue(v) {
+    if (selected < 0) return;
+    if (given[selected]) return;
+    if (v < 0) user[selected] = 0;
+    else user[selected] = v;
+    render();
+  }
+
+  function buildKeypad() {
+    keypadEl.innerHTML = '';
+    const keys = [1,2,3,4,5,6,7,8,9,'⌫','·'];
+    keys.forEach(k => {
+      const b = document.createElement('button');
+      b.className = 'key';
+      b.type = 'button';
+      b.textContent = String(k);
+      b.addEventListener('click', () => {
+        if (k === '⌫' || k === '·') setValue(-1);
+        else setValue(k);
+      });
+      keypadEl.appendChild(b);
+    });
+  }
+
+  function newGame() {
+    const diff = diffEl.value;
+    solution = generateSolved();
+    puzzle = makePuzzle(solution, diff);
+
+    given = puzzle.map(v => !!v);
+    user = puzzle.map(v => v || 0);
+    selected = user.findIndex((v,i)=>!given[i]);
+    buildKeypad();
+    render();
+  }
+
+  function check() {
+    render();
+    const conflicts = findConflicts(user).size;
+    if (conflicts) alert('Conflicts found (red cells).');
+    else alert('No conflicts.');
+  }
+
+  function fillSolution() {
+    user = clone(solution);
+    given = given.map(() => true);
+    selected = -1;
+    render();
+  }
+
+  // events
+  newBtn.addEventListener('click', newGame);
+  checkBtn.addEventListener('click', check);
+  solveBtn.addEventListener('click', fillSolution);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'n' || e.key === 'N') { newGame(); return; }
+    if (e.key === 'Backspace' || e.key === 'Delete') { setValue(-1); return; }
+    const d = Number(e.key);
+    if (d >= 1 && d <= 9) { setValue(d); return; }
+    // arrows
+    if (selected >= 0 && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+      const [r,c] = rc(selected);
+      let rr=r, cc=c;
+      if (e.key==='ArrowUp') rr = (r+8)%9;
+      if (e.key==='ArrowDown') rr = (r+1)%9;
+      if (e.key==='ArrowLeft') cc = (c+8)%9;
+      if (e.key==='ArrowRight') cc = (c+1)%9;
+      const ni = idx(rr,cc);
+      if (!given[ni]) selected = ni;
+      applyHighlights();
+    }
+  });
+
+  newGame();
+})();
+</script>
+</body>
+</html>
